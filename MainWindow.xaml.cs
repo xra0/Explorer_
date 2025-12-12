@@ -1,6 +1,7 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
 using дерево;
+using System.Collections.Generic;
 
 namespace Explorer
 {
@@ -13,7 +14,7 @@ namespace Explorer
             InitializeComponent();
         }
 
-        // СОЗДАНИЕ КОРНЯ
+        // Создание корня
         private void ButtonSetRoot_Click(object sender, RoutedEventArgs e)
         {
             if (string.IsNullOrWhiteSpace(TextBoxRoot.Text))
@@ -22,61 +23,68 @@ namespace Explorer
                 return;
             }
 
-            system.SetRoot(TextBoxRoot.Text.Trim());
-            RefreshTree();
+            system.CreateRoot(TextBoxRoot.Text.Trim());
+            UpdateTreeView();
+
+            ButtonSetRoot.IsEnabled = false;
             ButtonDelete.IsEnabled = true;
         }
 
-        // ДОБАВЛЕНИЕ ОБЪЕКТА
+        // Добавление узла
         private void ButtonAdd_Click(object sender, RoutedEventArgs e)
         {
             if (system.Root == null)
             {
-                MessageBox.Show("Сперва создайте корень.");
+                MessageBox.Show("Сначала создайте корень.");
                 return;
             }
 
-            string parent = TextBoxParent.Text.Trim();
-            string child = TextBoxChild.Text.Trim();
+            string parentName = TextBoxParent.Text.Trim();
+            string childName = TextBoxChild.Text.Trim();
 
-            if (parent == "" || child == "")
+            if (string.IsNullOrWhiteSpace(parentName) || string.IsNullOrWhiteSpace(childName))
             {
                 MessageBox.Show("Заполните оба поля.");
                 return;
             }
 
-            if (!system.AddObject(parent, child))
+            TreeNode parentNode = system.Root.Find(parentName);
+            if (parentNode == null)
             {
                 MessageBox.Show("Родитель не найден.");
                 return;
             }
 
-            RefreshTree();
+            parentNode.AddChild(new TreeNode(childName));
+            UpdateTreeView();
         }
 
-        // УДАЛЕНИЕ ПО ВЫБОРУ
+        // Удаление выбранного узла
         private void ButtonDelete_Click(object sender, RoutedEventArgs e)
         {
-            if (Tree.SelectedItem is not TreeViewItem item)
+            if (Tree.SelectedItem is not TreeViewItem selectedItem)
             {
-                MessageBox.Show("Выберите объект.");
+                MessageBox.Show("Выберите объект для удаления.");
                 return;
             }
 
-            TreeNode node = (TreeNode)item.Tag;
+            TreeNode node = (TreeNode)selectedItem.Tag;
 
             if (node == system.Root)
             {
-                MessageBox.Show("Корень удалить нельзя.");
-                return;
+                // Если удалить корень, очистим только его детей
+                system.Root.DeleteSubtree(system.Root.Name);
+            }
+            else
+            {
+                node.DeleteSubtree(node.Name);
             }
 
-            system.RemoveObject(node.Name);
-            RefreshTree();
+            UpdateTreeView();
         }
 
-        // ОБНОВЛЕНИЕ ДЕРЕВА
-        private void RefreshTree()
+        // Обновление TreeView
+        private void UpdateTreeView()
         {
             Tree.Items.Clear();
 
@@ -84,6 +92,7 @@ namespace Explorer
                 Tree.Items.Add(CreateTreeItem(system.Root));
         }
 
+        // Рекурсивное создание TreeViewItem
         private TreeViewItem CreateTreeItem(TreeNode node)
         {
             TreeViewItem item = new TreeViewItem
@@ -94,101 +103,165 @@ namespace Explorer
             };
 
             foreach (var child in node.Children)
+            {
                 item.Items.Add(CreateTreeItem(child));
+            }
 
             return item;
         }
     }
 }
 
-
 namespace дерево
 {
-    // Узел дерева
+    // Класс для узла дерева
     public class TreeNode
     {
         public string Name { get; set; }
-        public List<TreeNode> Children { get; set; }
         public TreeNode Parent { get; set; }
+        public LinkedList<TreeNode> Children { get; set; }
 
-        public TreeNode(string name)
+        public TreeNode(string name, TreeNode parent = null)
         {
             Name = name;
-            Children = new List<TreeNode>();
+            Parent = parent;
+            Children = new LinkedList<TreeNode>();
         }
 
+        // Добавление ребёнка
         public void AddChild(TreeNode child)
         {
             child.Parent = this;
-            Children.Add(child);
+            Children.AddLast(child);
         }
 
-        public void RemoveChild(TreeNode child)
+        // Удаление ребёнка
+        public bool RemoveChild(TreeNode child)
         {
-            Children.Remove(child);
+            return Children.Remove(child);
         }
 
-        // Поиск узла в поддереве
-        public TreeNode FindNode(string name)
+        // Поиск узла по имени (рекурсивно)
+        public TreeNode Find(string name)
         {
-            if (this.Name == name)
-                return this;
+            if (Name == name) return this;
 
-            foreach (var child in Children)
+            var current = Children.First;
+            while (current != null)
             {
-                var found = child.FindNode(name);
-                if (found != null)
-                    return found;
+                var found = current.Value.Find(name);
+                if (found != null) return found;
+                current = current.Next;
             }
 
             return null;
         }
 
-        // Удаление узла с поддеревом
-        public bool RemoveNode(string name)
+        // Удаление поддерева (всех детей и внуков)
+        public bool DeleteSubtree(string nodeName)
         {
-            foreach (var child in Children)
+            TreeNode nodeToDelete = Find(nodeName);
+            if (nodeToDelete == null) return false;
+
+            if (nodeToDelete.Parent == null)
             {
-                if (child.Name == name)
+                DeleteAllChildren(nodeToDelete);
+                return true;
+            }
+
+            DeleteAllChildren(nodeToDelete);
+
+            var parentList = nodeToDelete.Parent.Children;
+            var node = parentList.First;
+            while (node != null)
+            {
+                if (node.Value == nodeToDelete)
                 {
-                    Children.Remove(child);
-                    return true;
+                    parentList.Remove(node);
+                    break;
+                }
+                node = node.Next;
+            }
+
+            return true;
+        }
+
+        // Очистка всех детей
+        private void DeleteAllChildren(TreeNode root)
+        {
+            if (root.Children.Count == 0) return;
+
+            Stack<TreeNode> stack = new Stack<TreeNode>();
+            var childNode = root.Children.First;
+            while (childNode != null)
+            {
+                stack.Push(childNode.Value);
+                childNode = childNode.Next;
+            }
+
+            root.Children.Clear();
+
+            while (stack.Count > 0)
+            {
+                TreeNode currentNode = stack.Pop();
+                var currentChild = currentNode.Children.First;
+                while (currentChild != null)
+                {
+                    stack.Push(currentChild.Value);
+                    currentChild = currentChild.Next;
                 }
 
-                if (child.RemoveNode(name))
-                    return true;
+                currentNode.Children.Clear();
+                currentNode.Parent = null;
             }
-            return false;
+        }
+
+        // Получение корня дерева
+        public TreeNode Root
+        {
+            get
+            {
+                var current = this;
+                while (current.Parent != null)
+                    current = current.Parent;
+                return current;
+            }
         }
     }
 
-    // Чистая модель, без консоли
+    // Основной класс системы (без консоли)
     public class ObjectModelSystem
     {
         public TreeNode Root { get; private set; }
 
-        public void SetRoot(string name)
+        // Создание корня
+        public void CreateRoot(string name)
         {
             Root = new TreeNode(name);
         }
 
-        public bool AddObject(string parentName, string newNodeName)
+        // Добавление объекта
+        public bool AddObject(string parentName, string childName)
         {
             if (Root == null) return false;
-
-            TreeNode parent = Root.FindNode(parentName);
+            var parent = Root.Find(parentName);
             if (parent == null) return false;
 
-            parent.AddChild(new TreeNode(newNodeName));
+            parent.AddChild(new TreeNode(childName));
             return true;
         }
 
+        // Удаление объекта
         public bool RemoveObject(string name)
         {
             if (Root == null) return false;
-            if (Root.Name == name) return false; // нельзя удалить корень
+            if (Root.Name == name)
+            {
+                Root.DeleteSubtree(name);
+                return true;
+            }
 
-            return Root.RemoveNode(name);
+            return Root.DeleteSubtree(name);
         }
     }
 }
